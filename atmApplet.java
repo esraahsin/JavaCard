@@ -1,6 +1,6 @@
+package packageatm;
+
 import javacard.framework.*;
-import javacard.security.*;
-import javacardx.crypto.*;
 
 public class AtmApplet extends Applet {
     public static final byte CLA_ATM_APPLET = (byte) 0xB0;
@@ -16,28 +16,21 @@ public class AtmApplet extends Applet {
     private static final short MIN_BALANCE = 0;
 
     private short accountBalance;
-    private byte[] encryptedPin;
-    private Cipher cipher;
-    private AESKey aesKey;
+    private byte[] defaultPin; // PIN par défaut (sans cryptage)
 
+    // Private constructor
     private AtmApplet() {
         accountBalance = 0;
 
-        // Initialize a 16-byte AES key (128-bit)
-        aesKey = (AESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_AES, KeyBuilder.LENGTH_AES_128, false);
-        byte[] keyData = new byte[16];
-        Util.arrayFillNonAtomic(keyData, (short) 0, (short) keyData.length, (byte) 0x01); // Example key data
-        aesKey.setKey(keyData, (short) 0);
-
-        cipher = Cipher.getInstance(Cipher.ALG_AES_BLOCK_128_CBC_NOPAD, false);
-
-        // Encrypt the default PIN "1234" (padded to 16 bytes)
-        byte[] defaultPin = new byte[16];
-        defaultPin[0] = 1; defaultPin[1] = 2; defaultPin[2] = 3; defaultPin[3] = 4;
-        encryptedPin = new byte[16];
-        encryptPin(defaultPin, encryptedPin);
+        // PIN par défaut "1234"
+        defaultPin = JCSystem.makeTransientByteArray((short) 4, JCSystem.CLEAR_ON_RESET);
+        defaultPin[0] = 1;
+        defaultPin[1] = 2;
+        defaultPin[2] = 3;
+        defaultPin[3] = 4;
     }
 
+    // Méthode d'installation de l'applet
     public static void install(byte[] bArray, short bOffset, byte bLength) {
         new AtmApplet().register();
     }
@@ -83,29 +76,39 @@ public class AtmApplet extends Applet {
         byte[] buffer = apdu.getBuffer();
         byte byteRead = (byte) (buffer[ISO7816.OFFSET_LC] & 0xFF);
 
-        if (byteRead != 16) { // PIN must be 16 bytes after padding
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        // Journalisation de la longueur du PIN
+        if (byteRead != 4) { // PIN doit être de 4 octets
+            ISOException.throwIt((short) 0x63C1); // Longueur incorrecte
         }
 
         apdu.setIncomingAndReceive();
-        byte[] receivedPin = JCSystem.makeTransientByteArray((short) 16, JCSystem.CLEAR_ON_RESET);
-        decryptPin(encryptedPin, receivedPin);
 
-        if (Util.arrayCompare(buffer, ISO7816.OFFSET_CDATA, receivedPin, (short) 0, (short) 16) != 0) {
-            ISOException.throwIt((short) 0x6300); // PIN verification failed
+        // Récupération et copie du PIN reçu
+        byte[] receivedPin = JCSystem.makeTransientByteArray((short) 4, JCSystem.CLEAR_ON_RESET);
+        Util.arrayCopy(buffer, ISO7816.OFFSET_CDATA, receivedPin, (short) 0, (short) 4);
+
+        // Journalisation : Comparaison du PIN
+        if (Util.arrayCompare(defaultPin, (short) 0, receivedPin, (short) 0, (short) 4) != 0) {
+            ISOException.throwIt((short) 0x6301); // Vérification échouée
         }
+
+        // Journalisation : PIN correct
+        ISOException.throwIt((short) 0x9000); // Succès
     }
 
     private void updatePin(APDU apdu) {
         byte[] buffer = apdu.getBuffer();
         byte byteRead = (byte) (buffer[ISO7816.OFFSET_LC] & 0xFF);
 
-        if (byteRead != 16) { // New PIN must be 16 bytes
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        if (byteRead != 4) { // Nouveau PIN doit être de 4 octets
+            ISOException.throwIt((short) 0x63C2); // Longueur incorrecte pour mise à jour
         }
 
         apdu.setIncomingAndReceive();
-        encryptPin(buffer, ISO7816.OFFSET_CDATA, encryptedPin);
+        Util.arrayCopy(buffer, ISO7816.OFFSET_CDATA, defaultPin, (short) 0, (short) 4);
+
+        // Journalisation : PIN mis à jour
+        ISOException.throwIt((short) 0x9001); // Succès de mise à jour
     }
 
     private void checkBalance(APDU apdu) {
@@ -114,6 +117,9 @@ public class AtmApplet extends Applet {
         apdu.setOutgoingLength((short) 2);
         Util.setShort(buffer, (short) 0, accountBalance);
         apdu.sendBytes((short) 0, (short) 2);
+
+        // Journalisation : Consultation du solde
+        ISOException.throwIt((short) 0x9002); // Succès de consultation du solde
     }
 
     private void depositFunds(APDU apdu) {
@@ -122,10 +128,13 @@ public class AtmApplet extends Applet {
 
         short depositAmount = Util.getShort(buffer, ISO7816.OFFSET_CDATA);
         if ((short) (accountBalance + depositAmount) > MAX_BALANCE) {
-            ISOException.throwIt((short) 0x6A84);
+            ISOException.throwIt((short) 0x6A84); // Balance maximale dépassée
         }
 
         accountBalance += depositAmount;
+
+        // Journalisation : Dépôt effectué
+        ISOException.throwIt((short) 0x9003); // Succès du dépôt
     }
 
     private void withdrawFunds(APDU apdu) {
@@ -134,19 +143,12 @@ public class AtmApplet extends Applet {
 
         short withdrawAmount = Util.getShort(buffer, ISO7816.OFFSET_CDATA);
         if ((short) (accountBalance - withdrawAmount) < MIN_BALANCE) {
-            ISOException.throwIt((short) 0x6A85);
+            ISOException.throwIt((short) 0x6A85); // Fonds insuffisants
         }
 
         accountBalance -= withdrawAmount;
-    }
 
-    private void encryptPin(byte[] inputPin, short offset, byte[] outputEncryptedPin) {
-        cipher.init(aesKey, Cipher.MODE_ENCRYPT);
-        cipher.doFinal(inputPin, offset, (short) 16, outputEncryptedPin, (short) 0);
-    }
-
-    private void decryptPin(byte[] encryptedPin, byte[] outputPin) {
-        cipher.init(aesKey, Cipher.MODE_DECRYPT);
-        cipher.doFinal(encryptedPin, (short) 0, (short) 16, outputPin, (short) 0);
+        // Journalisation : Retrait effectué
+        ISOException.throwIt((short) 0x9004); // Succès du retrait
     }
 }
