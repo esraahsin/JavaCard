@@ -14,7 +14,7 @@ public class MaClasse {
     public static final byte INS_VERIFY_PIN = 0x03;
     public static final byte INS_DRAW = 0x02;
     public static final byte INS_DEPOSIT = 0x01;
-    public static final byte INS_CHECK_BALANCE =0x00;
+    public static final byte INS_CHECK_BALANCE = 0x00;
 
     private static CadT1Client cad;
 
@@ -111,9 +111,33 @@ public class MaClasse {
     }
 
     private static Object Afficher_Frame_checkbalance(byte insCheckBalance) {
-		// TODO Auto-generated method stub
-		return null;
-	}
+        try {
+            Apdu apdu = new Apdu();
+            apdu.command[Apdu.CLA] = CLA_ATM_APPLET;
+            apdu.command[Apdu.INS] = insCheckBalance;
+            apdu.command[Apdu.P1] = 0x00;
+            apdu.command[Apdu.P2] = 0x00;
+            // Journaliser la commande APDU envoyée
+            logApduCommand(apdu);
+
+            cad.exchangeApdu(apdu);
+
+            // Journaliser la réponse APDU reçue
+            logApduResponse(apdu);
+
+            if (apdu.getStatus() == 0x9000) {
+                byte[] balanceBytes = apdu.getDataOut();
+                int balance = ((balanceBytes[0] & 0xFF) << 8) | (balanceBytes[1] & 0xFF);
+                JOptionPane.showMessageDialog(null, "Solde actuel: " + balance + " unités.");
+            } else {
+                JOptionPane.showMessageDialog(null, "Erreur lors de la vérification du solde.");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
 
 	private static Object Afficher_FRame_deposit(byte insDeposit) {
 		// TODO Auto-generated method stub

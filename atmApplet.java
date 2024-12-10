@@ -113,14 +113,18 @@ public class AtmApplet extends Applet {
 
     private void checkBalance(APDU apdu) {
         byte[] buffer = apdu.getBuffer();
-        apdu.setOutgoing();
-        apdu.setOutgoingLength((short) 2);
-        Util.setShort(buffer, (short) 0, accountBalance);
-        apdu.sendBytes((short) 0, (short) 2);
 
-        // Journalisation : Consultation du solde
-        ISOException.throwIt((short) 0x9002); // Succès de consultation du solde
+        // Encode the account balance into two bytes (high byte and low byte)
+        buffer[0] = (byte) (accountBalance >> 8); // High byte
+        buffer[1] = (byte) (accountBalance & 0xFF); // Low byte
+
+        // Prepare the APDU response
+        apdu.setOutgoing();
+        apdu.setOutgoingLength((byte) 2);
+        apdu.sendBytes((short) 0, (short) 2);
     }
+
+
 
     private void depositFunds(APDU apdu) {
         byte[] buffer = apdu.getBuffer();
