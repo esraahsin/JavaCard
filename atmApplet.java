@@ -13,14 +13,16 @@ public class AtmApplet extends Applet {
     public static final byte INS_UPDATE_PIN = 0x04;
 
     private static final short MAX_BALANCE = 10000;
-    private static final short MIN_BALANCE = 0;
+    private static final short MIN_BALANCE = 10;
+    private static final byte MAX_ATTEMPTS = 3; // Maximum allowed attempts
+    private byte failedAttempts; // Compteur de tentatives échouées
 
     private short accountBalance;
     private byte[] defaultPin; // PIN par défaut (sans cryptage)
 
     // Private constructor
     private AtmApplet() {
-        accountBalance = 0;
+        accountBalance = 10;
 
         // PIN par défaut "1234"
         defaultPin = JCSystem.makeTransientByteArray((short) 4, JCSystem.CLEAR_ON_RESET);
@@ -87,15 +89,20 @@ public class AtmApplet extends Applet {
         byte[] receivedPin = JCSystem.makeTransientByteArray((short) 4, JCSystem.CLEAR_ON_RESET);
         Util.arrayCopy(buffer, ISO7816.OFFSET_CDATA, receivedPin, (short) 0, (short) 4);
 
-        // Journalisation : Comparaison du PIN
+		// Journalisation : Comparaison du PIN
         if (Util.arrayCompare(defaultPin, (short) 0, receivedPin, (short) 0, (short) 4) != 0) {
+            failedAttempts++;
+            if (failedAttempts >= MAX_ATTEMPTS) {
+                // Card is blocked after 3 failed attempts
+                ISOException.throwIt((short) 0x6A88); // Card blocked due to too many failed attempts
+            }
             ISOException.throwIt((short) 0x6301); // Vérification échouée
         }
 
-        // Journalisation : PIN correct
+        // Reset the failed attempts counter after successful verification
+        failedAttempts = 0;
         ISOException.throwIt((short) 0x9000); // Succès
     }
-
     private void updatePin(APDU apdu) {
         byte[] buffer = apdu.getBuffer();
         byte byteRead = (byte) (buffer[ISO7816.OFFSET_LC] & 0xFF);
@@ -131,14 +138,22 @@ public class AtmApplet extends Applet {
         apdu.setIncomingAndReceive();
 
         short depositAmount = Util.getShort(buffer, ISO7816.OFFSET_CDATA);
+
+        if (depositAmount > 500) {
+            ISOException.throwIt((short) 0x6A83); // Montant de dépôt trop élevé
+        }
+
+        if (depositAmount % 10 != 0) {
+            ISOException.throwIt((short) 0x6A82); // Montant de dépôt invalide
+        }
+
         if ((short) (accountBalance + depositAmount) > MAX_BALANCE) {
             ISOException.throwIt((short) 0x6A84); // Balance maximale dépassée
         }
 
         accountBalance += depositAmount;
 
-        // Journalisation : Dépôt effectué
-        ISOException.throwIt((short) 0x9003); // Succès du dépôt
+        ISOException.throwIt((short) 0x9000); // Succès du dépôt
     }
 
     private void withdrawFunds(APDU apdu) {
@@ -153,6 +168,6 @@ public class AtmApplet extends Applet {
         accountBalance -= withdrawAmount;
 
         // Journalisation : Retrait effectué
-        ISOException.throwIt((short) 0x9004); // Succès du retrait
+        ISOException.throwIt((short) 0x9000); // Succès du retrait
     }
 }
