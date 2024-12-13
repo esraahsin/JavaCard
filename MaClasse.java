@@ -139,13 +139,171 @@ public class MaClasse {
     }
 
 
-	private static Object Afficher_FRame_deposit(byte insDeposit) {
-		// TODO Auto-generated method stub
-		return null;
-	}
+    private static boolean deposit(CadT1Client cad, int amount) throws Exception {
+        Apdu apdu = new Apdu();
+        apdu.command[Apdu.CLA] = CLA_ATM_APPLET;
+        apdu.command[Apdu.INS] = INS_DEPOSIT;
+        apdu.command[Apdu.P1] = 0x00;
+        apdu.command[Apdu.P2] = 0x00;
+
+        byte[] amountBytes = new byte[2];
+        amountBytes[0] = (byte) (amount >> 8);
+        amountBytes[1] = (byte) (amount);
+
+        apdu.setDataIn(amountBytes);
+
+        logApduCommand(apdu);
+
+        cad.exchangeApdu(apdu);
+
+        logApduResponse(apdu);
+
+        int status = apdu.getStatus();
+        if (status == 0x9000) {
+            return true; // Succès
+        } else {
+            showErrorDialog(status);
+            return false; // Échec
+        }
+    }
+
+    private static void showErrorDialog(int status) {
+        String errorMessage;
+        switch (status) {
+            case 0x6A83:
+                errorMessage = "Montant de dépôt trop élevé. Le montant ne doit pas dépasser 500 unités.";
+                break;
+            case 0x6A82:
+                errorMessage = "Montant de dépôt invalide. Le montant doit être un multiple de 10.";
+                break;
+            case 0x6A84:
+                errorMessage = "Balance maximale dépassée. Le solde ne doit pas dépasser 10000 unités.";
+                break;
+            default:
+                errorMessage = "Erreur lors du dépôt.";
+                break;
+        }
+        JOptionPane.showMessageDialog(null, errorMessage, "Erreur de Dépôt", JOptionPane.ERROR_MESSAGE);
+    }
+
+    private static void Afficher_FRame_deposit(byte insDeposit) {
+        JFrame depositFrame = new JFrame("Déposer de l'argent");
+        depositFrame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        depositFrame.setSize(300, 200);
+        depositFrame.setLayout(new GridLayout(3, 1));
+
+        JTextField amountField = new JTextField();
+        JButton depositButton = new JButton("Déposer");
+
+        depositFrame.add(new JLabel("Entrez le montant à déposer :"));
+        depositFrame.add(amountField);
+        depositFrame.add(depositButton);
+
+        depositButton.addActionListener(e -> {
+            String amountText = amountField.getText();
+            try {
+                int amount = Integer.parseInt(amountText);
+                if (deposit(cad, amount)) {
+                    JOptionPane.showMessageDialog(depositFrame, "Dépôt réussi.");
+                    depositFrame.dispose();
+                }
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(depositFrame, "Veuillez entrer un montant valide.");
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        });
+
+        depositFrame.setVisible(true);
+    }
+
 
 	private static void Afficher_frame_draw(byte insDraw) {
-		// TODO Auto-generated method stub
+	    SwingUtilities.invokeLater(() -> {
+	        JFrame mainFrame = new JFrame("ATM Simulator - Withdraw");
+	        mainFrame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+	        mainFrame.setSize(300, 300);
+	        mainFrame.setLayout(new GridLayout(5, 1, 10, 10));
+
+	        JLabel instructionLabel = new JLabel("Select a withdrawal amount:", SwingConstants.CENTER);
+	        mainFrame.add(instructionLabel);
+
+	        String[] amounts = {"10", "20", "50", "100", "Other"};
+	        for (String amount : amounts) {
+	            JButton button = new JButton(amount);
+	            button.addActionListener(e -> {
+	                if ("Other".equals(amount)) {
+	                    createOtherAmountGUI(insDraw);
+	                } else {
+	                    try {
+	                        int amountInt = Integer.parseInt(amount);
+	                        withdrawFunds(insDraw, amountInt);
+	                    } catch (Exception ex) {
+	                        ex.printStackTrace();
+	                    }
+	                }
+	            });
+	            mainFrame.add(button);
+	        }
+
+	        mainFrame.setVisible(true);
+	    });
+	}
+
+	private static void createOtherAmountGUI(byte insDraw) {
+	    JFrame otherFrame = new JFrame("Custom Amount");
+	    otherFrame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+	    otherFrame.setSize(300, 200);
+	    otherFrame.setLayout(new GridLayout(3, 1, 10, 10));
+
+	    JTextField amountField = new JTextField();
+	    JLabel errorLabel = new JLabel("", SwingConstants.CENTER);
+	    errorLabel.setForeground(Color.RED);
+	    JButton confirmButton = new JButton("Confirm");
+
+	    confirmButton.addActionListener(e -> {
+	        String input = amountField.getText();
+	        try {
+	            int amount = Integer.parseInt(input);
+	            if (amount <= 0) {
+	                errorLabel.setText("Amount must be greater than 0.");
+	            } else {
+	                withdrawFunds(insDraw, amount);
+	                otherFrame.dispose();
+	            }
+	        } catch (NumberFormatException ex) {
+	            errorLabel.setText("Invalid amount. Please enter a number.");
+	        }
+	    });
+
+	    otherFrame.add(amountField);
+	    otherFrame.add(confirmButton);
+	    otherFrame.add(errorLabel);
+
+	    otherFrame.setVisible(true);
+	}
+
+	private static void withdrawFunds(byte insDraw, int amount) {
+	    try {
+	        Apdu apdu = new Apdu();
+	        apdu.command[Apdu.CLA] = CLA_ATM_APPLET; // Use appropriate CLA
+	        apdu.command[Apdu.INS] = insDraw; // Use the provided instruction
+	        apdu.command[Apdu.P1] = 0x00;
+	        apdu.command[Apdu.P2] = 0x00;
+	        apdu.setDataIn(new byte[]{(byte) (amount >> 8), (byte) amount});
+
+	        logApduCommand(apdu);
+	        cad.exchangeApdu(apdu);
+	        logApduResponse(apdu);
+
+	        if (apdu.getStatus() == 0x9000) {
+	            JOptionPane.showMessageDialog(null, "Withdrawal successful: " + amount + " units.");
+	        } else {
+	            JOptionPane.showMessageDialog(null, "Error during withdrawal.");
+	        }
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	    }
 	}
 
 	private static void handleTransaction(byte instruction) {
